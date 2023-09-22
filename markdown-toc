@@ -1,0 +1,113 @@
+#!/usr/bin/env python
+#----------------------------------------------------------------------------
+#
+# Build table of contents in markdown files.
+# Copyright (c) 2023, Thierry Lelegard
+# BSD-2-Clause license, see the LICENSE file.
+#
+#----------------------------------------------------------------------------
+
+import os, sys, re, string
+
+input_files = []
+toc_only = False
+toc_header = '**Contents:**'
+
+#----------------------------------------------------------------------------
+
+def usage():
+    print("""
+Usage: %s [options] md-file ...
+
+Options:
+    -h : print this help text
+    -o : only output table of content, don't update input files
+    -t 'string' : existing ToC header string, default: '%s'
+""" % (os.path.basename(__file__), toc_header), file=sys.stderr)
+    exit(1)
+
+#----------------------------------------------------------------------------
+
+# Decode command line parameters.
+i = 1
+while i < len(sys.argv):
+    if sys.argv[i] == '-o':
+        toc_only = True
+    elif sys.argv[i] == '-t' and i < len(sys.argv) - 1:
+        i += 1
+        toc_header = sys.argv[i]
+    elif not sys.argv[i].startswith('-'):
+        input_files.append(sys.argv[i])
+    else:
+        usage()
+    i += 1
+
+if (len(input_files)) == 0:
+    usage()
+
+for filename in input_files:
+
+    # Read file, build ToC.
+    output_intro = ''
+    input_toc = ''
+    output_toc = []
+    output_body = ''
+    state = 'intro'
+    in_code = False
+    main_title = None
+    with open(filename, 'r') as input:
+        for line in input:
+            sline = line.strip()
+            if state == 'intro':
+                if not toc_only:
+                    output_intro += line
+                if sline.startswith(toc_header):
+                    # Found ToC header, start collecting headers and build ToC
+                    state = 'toc'
+            elif state == 'toc':
+                if sline.startswith('* '):
+                    input_toc += line
+                elif sline != '':
+                    state = 'body'
+            if state == 'body' or toc_only:
+                if not toc_only:
+                    output_body += line
+                if sline.startswith('~~~') or sline.startswith('```'):
+                    in_code = not in_code
+                if sline.startswith('#') and not in_code:
+                    # Found a header.
+                    level = re.search(r'[^#]', sline).start()
+                    text = sline[level:].strip().replace('`', '')
+                    anchor = ''.join([c for c in text.lower().replace(' ', '-') if c in string.ascii_lowercase + string.digits + '-'])
+                    toc_line = '%s* [%s](#%s)\n' % (((2 * (level - 1)) * ' '), text, anchor)
+                    if level > 1 or not toc_only:
+                        output_toc.append(toc_line)
+                    elif main_title is None and len(output_toc) == 0:
+                        # In ToC only mode, found the first level-1 title, not in ToC by default.
+                        main_title = toc_line
+                    else:
+                        # Found another level-1 title, include them all.
+                        output_toc.append(toc_line)
+                        if main_title is not None:
+                            output_toc.insert(0, main_title)
+
+    # Adjust indentation in output ToC
+    min_indent = 999
+    for line in output_toc:
+        min_indent = min(min_indent, re.search(r'[^ ]', line).start())
+    if min_indent > 0:
+        for i in range(len(output_toc)):
+            output_toc[i] = output_toc[i][min_indent:]
+    output_toc = ''.join(output_toc)
+
+    # Phase 2: rewrite the file if a new ToC was produced.
+    if toc_only:
+        print(output_toc, end='')
+    elif output_toc != '' and output_toc != input_toc:
+        print('updating ToC of %s' % filename)
+        with open(filename, 'w') as output:
+            output.write(output_intro)
+            output.write('\n')
+            output.write(output_toc)
+            output.write('\n')
+            output.write(output_body)
