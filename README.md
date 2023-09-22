@@ -1,4 +1,4 @@
-# Build a Toble of Contents in a markdown file
+# Build a Table of Contents in a markdown file
 
 The Python script in this project builds a table of contents in a markdown file.
 
